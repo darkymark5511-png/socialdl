@@ -2,6 +2,7 @@ import NextAuth from "next-auth";
 import Credentials from "next-auth/providers/credentials";
 import bcrypt from "bcryptjs";
 import { z } from "zod";
+import { authConfig } from "./auth.config";
 
 const credentialsSchema = z.object({
   username: z.string().min(1).max(64),
@@ -9,6 +10,7 @@ const credentialsSchema = z.object({
 });
 
 export const { handlers, auth, signIn, signOut } = NextAuth({
+  ...authConfig,
   providers: [
     Credentials({
       name: "Credentials",
@@ -37,11 +39,8 @@ export const { handlers, auth, signIn, signOut } = NextAuth({
       },
     }),
   ],
-  session: { strategy: "jwt", maxAge: 60 * 60 * 12 },
-  pages: {
-    signIn: "/admin/login",
-  },
   callbacks: {
+    ...authConfig.callbacks,
     async jwt({ token, user }) {
       if (user) {
         token.sub = user.id;
@@ -57,5 +56,4 @@ export const { handlers, auth, signIn, signOut } = NextAuth({
     },
   },
   secret: process.env.NEXTAUTH_SECRET,
-  trustHost: true,
 });

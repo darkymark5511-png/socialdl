@@ -7,6 +7,32 @@ import { getClientIp, pushLog } from "@/lib/logger";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
+export const maxDuration = 60;
+
+const SCRAPER_TIMEOUT_MS = 45_000;
+
+function withTimeout<T>(promise: Promise<T>, ms: number): Promise<T> {
+  return new Promise<T>((resolve, reject) => {
+    const timer = setTimeout(() => {
+      reject(
+        new ScraperError(
+          "Scraper timeout. Platform terlalu lambat merespons atau memblokir request.",
+          "UPSTREAM_ERROR"
+        )
+      );
+    }, ms);
+    promise.then(
+      (v) => {
+        clearTimeout(timer);
+        resolve(v);
+      },
+      (e) => {
+        clearTimeout(timer);
+        reject(e);
+      }
+    );
+  });
+}
 
 export async function POST(req: NextRequest) {
   const started = Date.now();
@@ -74,7 +100,10 @@ export async function POST(req: NextRequest) {
   }
 
   try {
-    const media = await extractMedia(parsed.data.url);
+    const media = await withTimeout(
+      extractMedia(parsed.data.url),
+      SCRAPER_TIMEOUT_MS
+    );
     pushLog({
       ip,
       platform: media.metadata.platform,
@@ -87,7 +116,8 @@ export async function POST(req: NextRequest) {
   } catch (err) {
     let status = 502;
     let code: string = "UPSTREAM_ERROR";
-    let message = "Upstream error";
+    let message =
+      "Gagal mengekstrak. Pastikan link publik, atau coba lagi 1-2 menit kemudian.";
 
     if (err instanceof ScraperError) {
       code = err.code;
@@ -107,10 +137,20 @@ export async function POST(req: NextRequest) {
           status = 429;
           break;
         default:
-          status = 502;
+          status =
+            /timeout/i.test(err.message) || /lambat/i.test(err.message)
+              ? 504
+              : 502;
       }
     } else if (err instanceof Error) {
-      message = err.message;
+      if (/timeout/i.test(err.message)) {
+        status = 504;
+        code = "UPSTREAM_ERROR";
+        message =
+          "Scraper timeout. Platform terlalu lambat merespons atau memblokir request.";
+      } else {
+        message = err.message;
+      }
     }
 
     pushLog({
@@ -123,9 +163,7 @@ export async function POST(req: NextRequest) {
     });
 
     const headers: HeadersInit = {};
-    if (status === 429) {
-      headers["Retry-After"] = "30";
-    }
+    if (status === 429) headers["Retry-After"] = "30";
 
     return NextResponse.json(
       { ok: false, error: { code, message } },

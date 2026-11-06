@@ -1,6 +1,6 @@
 "use client";
 
-import { Download } from "lucide-react";
+import { Download, ExternalLink } from "lucide-react";
 
 function proxyUrl(url: string, filename: string): string {
   const q = new URLSearchParams({ url, filename });
@@ -30,7 +30,13 @@ export type MediaCardItem = {
   title?: string;
 };
 
-export function MediaCard({ item, index }: { item: MediaCardItem; index: number }) {
+export function MediaCard({
+  item,
+  index,
+}: {
+  item: MediaCardItem;
+  index: number;
+}) {
   const name = safeName(item.title ?? `item-${index + 1}`, mimeExt(item.mime));
   const href = proxyUrl(item.url, name);
 
@@ -44,6 +50,7 @@ export function MediaCard({ item, index }: { item: MediaCardItem; index: number 
             alt={item.title ?? `Media ${index + 1}`}
             className="h-full w-full object-cover"
             loading="lazy"
+            referrerPolicy="no-referrer"
           />
         ) : (
           <video
@@ -55,17 +62,29 @@ export function MediaCard({ item, index }: { item: MediaCardItem; index: number 
           />
         )}
       </div>
-      <div className="absolute inset-x-0 bottom-0 flex items-center justify-between gap-2 bg-gradient-to-t from-black/80 to-transparent p-3 opacity-100 transition-opacity md:opacity-0 md:group-hover:opacity-100">
+      <div className="absolute inset-x-0 bottom-0 flex items-center justify-between gap-2 bg-gradient-to-t from-black/90 via-black/50 to-transparent p-3 opacity-100 transition-opacity md:opacity-0 md:group-hover:opacity-100">
         <span className="text-[11px] font-medium uppercase tracking-wide text-white/70">
           {item.type}
         </span>
-        <a
-          href={href}
-          className="inline-flex h-8 items-center gap-1.5 rounded-xl bg-white px-3 text-xs font-semibold text-black transition active:scale-95"
-        >
-          <Download className="h-3.5 w-3.5" />
-          Download
-        </a>
+        <div className="flex items-center gap-1.5">
+          <a
+            href={item.url}
+            target="_blank"
+            rel="noopener noreferrer"
+            title="Open direct CDN link"
+            className="inline-flex h-8 items-center gap-1 rounded-xl border border-white/20 bg-black/40 px-2.5 text-xs font-medium text-white/90 backdrop-blur hover:bg-white/10"
+          >
+            <ExternalLink className="h-3.5 w-3.5" />
+            Direct
+          </a>
+          <a
+            href={href}
+            className="inline-flex h-8 items-center gap-1.5 rounded-xl bg-[#E8FF47] px-3 text-xs font-semibold text-black transition active:scale-95 hover:bg-[#d4eb3a]"
+          >
+            <Download className="h-3.5 w-3.5" />
+            Save
+          </a>
+        </div>
       </div>
     </div>
   );

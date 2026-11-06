@@ -25,7 +25,6 @@ export const { handlers, auth, signIn, signOut } = NextAuth({
         const expectedUser = process.env.ADMIN_USERNAME;
         const hash = process.env.ADMIN_PASSWORD_HASH;
         if (!expectedUser || !hash) return null;
-
         if (parsed.data.username !== expectedUser) return null;
 
         const ok = await bcrypt.compare(parsed.data.password, hash);

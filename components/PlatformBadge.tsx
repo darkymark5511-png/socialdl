@@ -1,6 +1,5 @@
 "use client";
 
-import { Badge } from "@/components/ui/badge";
 import type { Platform } from "@/lib/scraper/types";
 
 const LABELS: Record<Platform, string> = {
@@ -15,23 +14,18 @@ const LABELS: Record<Platform, string> = {
   unknown: "Unknown",
 };
 
-const COLORS: Record<Platform, string> = {
-  tiktok: "bg-black text-white",
-  instagram: "bg-pink-600 text-white",
-  x: "bg-zinc-900 text-white dark:bg-zinc-100 dark:text-zinc-900",
-  xiaohongshu: "bg-red-500 text-white",
-  douyin: "bg-cyan-600 text-white",
-  youtube: "bg-red-600 text-white",
-  facebook: "bg-blue-600 text-white",
-  pinterest: "bg-red-700 text-white",
-  unknown: "bg-zinc-500 text-white",
-};
-
 export function PlatformBadge({ platform }: { platform: Platform }) {
   return (
-    <Badge className={COLORS[platform]} variant="default">
+    <span
+      className="inline-flex items-center rounded-full border px-2.5 py-1 text-[11px] font-medium"
+      style={{
+        borderColor: "var(--border)",
+        background: "var(--elevated)",
+        color: "var(--text)",
+      }}
+    >
       {LABELS[platform]}
-    </Badge>
+    </span>
   );
 }
 

@@ -3,13 +3,21 @@ import { DownloaderForm } from "@/components/DownloaderForm";
 export default function HomePage() {
   return (
     <div className="space-y-8">
-      <div className="mx-auto max-w-3xl text-center">
-        <h1 className="text-3xl font-bold tracking-tight sm:text-4xl">
-          Download public media
+      <div>
+        <p
+          className="mb-2 text-xs font-medium uppercase tracking-[0.18em]"
+          style={{ color: "var(--lime)" }}
+        >
+          media extractor
+        </p>
+        <h1 className="sd-display text-3xl font-semibold tracking-tight sm:text-4xl">
+          Pull the file.
+          <br />
+          Keep the noise out.
         </h1>
-        <p className="mt-2 text-zinc-500">
-          TikTok · Instagram · X · Douyin · Xiaohongshu · YouTube Shorts ·
-          Facebook · Pinterest
+        <p className="mt-3 max-w-md text-sm" style={{ color: "var(--muted)" }}>
+          Paste a public post URL. Toggle which platforms you care about in
+          settings. Download video, image, audio, live photo, or full carousel.
         </p>
       </div>
       <DownloaderForm />

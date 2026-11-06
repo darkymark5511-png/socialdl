@@ -5,23 +5,25 @@ import {
   ScraperError,
 } from "./types";
 
-type ScraprResponse = {
-  status: boolean;
+type ScraprFn = (url: string) => Promise<unknown>;
+
+type LooseResult = {
+  status?: boolean;
+  success?: boolean;
   message?: string;
-  result?: {
-    title?: string;
-    author?: string;
-    thumbnail?: string;
-    duration?: number;
-    downloads?: Array<{
-      url: string;
-      quality?: string;
-      type?: string;
-      size?: number;
-    }>;
-    images?: Array<{ url: string; width?: number; height?: number }>;
-    videos?: Array<{ url: string; quality?: string; duration?: number }>;
-  };
+  result?: Record<string, unknown>;
+  data?: Record<string, unknown>;
+  title?: string;
+  author?: string;
+  thumbnail?: string;
+  duration?: number;
+  downloads?: Array<Record<string, unknown>>;
+  images?: Array<Record<string, unknown>>;
+  videos?: Array<Record<string, unknown>>;
+  media?: Array<Record<string, unknown>>;
+  url?: string;
+  video_url?: string;
+  display_url?: string;
 };
 
 function detectPlatform(url: string): Platform {
@@ -33,8 +35,7 @@ function detectPlatform(url: string): Platform {
   if (u.includes("xiaohongshu.com") || u.includes("xhslink.com") || u.includes("rednote"))
     return "xiaohongshu";
   if (u.includes("douyin.com") || u.includes("iesdouyin")) return "douyin";
-  if (u.includes("youtube.com") || u.includes("youtu.be") || u.includes("youtube.com/shorts"))
-    return "youtube";
+  if (u.includes("youtube.com") || u.includes("youtu.be")) return "youtube";
   if (u.includes("facebook.com") || u.includes("fb.watch") || u.includes("fb.com"))
     return "facebook";
   if (u.includes("pinterest.com") || u.includes("pin.it")) return "pinterest";
@@ -43,274 +44,310 @@ function detectPlatform(url: string): Platform {
 
 function guessMime(url: string, fallback: string): string {
   const lower = url.toLowerCase();
-  if (lower.includes(".mp4") || lower.includes("video")) return "video/mp4";
+  if (lower.includes(".mp4") || lower.includes("video") || lower.includes("cdninstagram"))
+    return fallback.startsWith("image") ? fallback : "video/mp4";
   if (lower.includes(".webm")) return "video/webm";
-  if (lower.includes(".m4a") || lower.includes("audio")) return "audio/mp4";
+  if (lower.includes(".m4a")) return "audio/mp4";
   if (lower.includes(".mp3")) return "audio/mpeg";
-  if (lower.includes(".jpg") || lower.includes(".jpeg")) return "image/jpeg";
+  if (lower.includes(".jpg") || lower.includes(".jpeg") || lower.includes("scontent"))
+    return "image/jpeg";
   if (lower.includes(".png")) return "image/png";
   if (lower.includes(".webp")) return "image/webp";
   return fallback;
 }
 
-function buildMetadata(
-  sourceUrl: string,
-  platform: Platform,
-  result?: ScraprResponse["result"]
-): MediaMetadata {
-  return {
-    title: result?.title,
-    author: result?.author,
-    platform,
-    sourceUrl,
-    thumbnailUrl: result?.thumbnail,
-    durationSec: result?.duration,
-    extractedAt: new Date().toISOString(),
-  };
+function asString(v: unknown): string | undefined {
+  return typeof v === "string" && v.length > 0 ? v : undefined;
 }
 
-function normalizeDownloads(result: NonNullable<ScraprResponse["result"]>): MediaResult | null {
-  const downloads = result.downloads ?? [];
-  const images = result.images ?? [];
-  const videos = result.videos ?? [];
+function asNumber(v: unknown): number | undefined {
+  return typeof v === "number" && Number.isFinite(v) ? v : undefined;
+}
 
-  if (images.length === 1 && videos.length === 1) {
-    const img = images[0]!;
-    const vid = videos[0]!;
+function isDirectMediaUrl(url: string): boolean {
+  const u = url.toLowerCase();
+  if (u.startsWith("blob:")) return false;
+  if (u.includes("instagram.com/p/") || u.includes("instagram.com/reel/")) return false;
+  return (
+    u.includes(".mp4") ||
+    u.includes(".m3u8") ||
+    u.includes(".jpg") ||
+    u.includes(".jpeg") ||
+    u.includes(".png") ||
+    u.includes(".webp") ||
+    u.includes("cdninstagram") ||
+    u.includes("fbcdn") ||
+    u.includes("rapidcdn") ||
+    u.includes("snapxcdn") ||
+    u.includes("tiktokcdn") ||
+    u.includes("pinimg") ||
+    u.includes("/v/t") ||
+    u.includes("token=")
+  );
+}
+
+function collectUrls(node: unknown, out: string[] = [], depth = 0): string[] {
+  if (depth > 6 || node == null) return out;
+  if (typeof node === "string") {
+    if (node.startsWith("http") && isDirectMediaUrl(node)) out.push(node);
+    return out;
+  }
+  if (Array.isArray(node)) {
+    for (const item of node) collectUrls(item, out, depth + 1);
+    return out;
+  }
+  if (typeof node === "object") {
+    const obj = node as Record<string, unknown>;
+    for (const key of ["url", "video_url", "display_url", "src", "download_url", "video", "image", "thumbnail"]) {
+      const v = obj[key];
+      if (typeof v === "string" && v.startsWith("http")) out.push(v);
+    }
+    for (const v of Object.values(obj)) collectUrls(v, out, depth + 1);
+  }
+  return out;
+}
+
+function normalizeLoose(raw: unknown, platform: Platform, sourceUrl: string): MediaResult | null {
+  if (!raw || typeof raw !== "object") return null;
+  const r = raw as LooseResult;
+  const payload =
+    (r.result as Record<string, unknown> | undefined) ??
+    (r.data as Record<string, unknown> | undefined) ??
+    (r as Record<string, unknown>);
+
+  const title = asString(payload.title) ?? asString(payload.description) ?? asString(r.title);
+  const author = asString(payload.author) ?? asString(payload.username) ?? asString(r.author);
+  const thumbnail = asString(payload.thumbnail) ?? asString(payload.preview) ?? asString(r.thumbnail);
+  const duration = asNumber(payload.duration) ?? asNumber(r.duration);
+
+  const downloads = (payload.downloads as Array<Record<string, unknown>> | undefined) ?? r.downloads ?? [];
+  const images = (payload.images as Array<Record<string, unknown>> | undefined) ?? r.images ?? [];
+  const videos = (payload.videos as Array<Record<string, unknown>> | undefined) ?? r.videos ?? [];
+  const media = (payload.media as Array<Record<string, unknown>> | undefined) ?? r.media ?? [];
+
+  const meta: MediaMetadata = {
+    title,
+    author,
+    platform,
+    sourceUrl,
+    thumbnailUrl: thumbnail,
+    durationSec: duration,
+    extractedAt: new Date().toISOString(),
+  };
+
+  const videoUrls: string[] = [];
+  const imageUrls: string[] = [];
+
+  for (const d of downloads) {
+    const u = asString(d.url);
+    if (!u) continue;
+    const type = asString(d.type)?.toLowerCase() ?? "";
+    if (type.includes("video") || guessMime(u, "").startsWith("video")) videoUrls.push(u);
+    else if (type.includes("image") || guessMime(u, "").startsWith("image")) imageUrls.push(u);
+    else if (isDirectMediaUrl(u)) {
+      if (guessMime(u, "video/mp4").startsWith("video")) videoUrls.push(u);
+      else imageUrls.push(u);
+    }
+  }
+  for (const v of videos) {
+    const u = asString(v.url) ?? asString(v.video_url);
+    if (u) videoUrls.push(u);
+  }
+  for (const img of images) {
+    const u = asString(img.url) ?? asString(img.display_url);
+    if (u) imageUrls.push(u);
+  }
+  for (const m of media) {
+    const u = asString(m.url);
+    if (!u) continue;
+    const type = asString(m.type)?.toLowerCase() ?? "";
+    if (type.includes("video") || guessMime(u, "video/mp4").startsWith("video")) videoUrls.push(u);
+    else imageUrls.push(u);
+  }
+
+  const topVideo = asString(payload.video_url) ?? asString(r.video_url);
+  const topImage = asString(payload.display_url) ?? asString(r.display_url);
+  if (topVideo && isDirectMediaUrl(topVideo)) videoUrls.push(topVideo);
+  if (topImage && isDirectMediaUrl(topImage)) imageUrls.push(topImage);
+
+  if (videoUrls.length === 0 && imageUrls.length === 0) {
+    for (const u of collectUrls(raw)) {
+      if (guessMime(u, "video/mp4").startsWith("video")) videoUrls.push(u);
+      else if (guessMime(u, "image/jpeg").startsWith("image")) imageUrls.push(u);
+      else if (isDirectMediaUrl(u)) videoUrls.push(u);
+    }
+  }
+
+  const uniq = (arr: string[]) => [...new Set(arr)];
+  const vids = uniq(videoUrls).filter(isDirectMediaUrl);
+  const imgs = uniq(imageUrls).filter((u) => isDirectMediaUrl(u) || u.startsWith("http"));
+
+  if (imgs.length === 1 && vids.length === 1) {
     return {
       kind: "live_photo",
-      metadata: buildMetadata("", "unknown", result),
-      image: { url: img.url, mime: guessMime(img.url, "image/jpeg") },
-      video: {
-        url: vid.url,
-        mime: guessMime(vid.url, "video/mp4"),
-        durationSec: vid.duration ?? result.duration ?? 0,
-      },
+      metadata: meta,
+      image: { url: imgs[0]!, mime: guessMime(imgs[0]!, "image/jpeg") },
+      video: { url: vids[0]!, mime: guessMime(vids[0]!, "video/mp4"), durationSec: duration ?? 0 },
     };
   }
 
-  if (images.length > 1 || (images.length >= 1 && videos.length >= 1)) {
-    const items: Array<{
-      id: string;
-      type: "image" | "video";
-      url: string;
-      mime: string;
-      width?: number;
-      height?: number;
-    }> = [];
-    images.forEach((img, i) => {
-      items.push({
-        id: `img-${i}`,
-        type: "image",
-        url: img.url,
-        mime: guessMime(img.url, "image/jpeg"),
-        width: img.width,
-        height: img.height,
-      });
-    });
-    videos.forEach((vid, i) => {
-      items.push({
-        id: `vid-${i}`,
-        type: "video",
-        url: vid.url,
-        mime: guessMime(vid.url, "video/mp4"),
-      });
-    });
-    return {
-      kind: "carousel",
-      metadata: buildMetadata("", "unknown", result),
-      items,
-    };
+  if (imgs.length + vids.length > 1) {
+    const items: Array<{ id: string; type: "image" | "video"; url: string; mime: string }> = [];
+    imgs.forEach((url, i) => items.push({ id: `img-${i}`, type: "image", url, mime: guessMime(url, "image/jpeg") }));
+    vids.forEach((url, i) => items.push({ id: `vid-${i}`, type: "video", url, mime: guessMime(url, "video/mp4") }));
+    return { kind: "carousel", metadata: meta, items };
   }
 
-  const videoDl = downloads.find(
-    (d) =>
-      (d.type && d.type.toLowerCase().includes("video")) ||
-      guessMime(d.url, "").startsWith("video/")
-  );
-  if (videoDl || videos.length === 1) {
-    const src = videoDl ?? { url: videos[0]!.url, quality: videos[0]!.quality, size: undefined };
+  if (vids.length === 1) {
     return {
       kind: "video",
-      metadata: buildMetadata("", "unknown", result),
-      file: {
-        url: src.url,
-        mime: guessMime(src.url, "video/mp4"),
-        quality: src.quality,
-        sizeBytes: src.size,
-      },
+      metadata: meta,
+      file: { url: vids[0]!, mime: guessMime(vids[0]!, "video/mp4") },
     };
   }
 
-  const audioDl = downloads.find(
-    (d) =>
-      (d.type && d.type.toLowerCase().includes("audio")) ||
-      guessMime(d.url, "").startsWith("audio/")
-  );
-  if (audioDl) {
-    return {
-      kind: "audio",
-      metadata: buildMetadata("", "unknown", result),
-      file: {
-        url: audioDl.url,
-        mime: guessMime(audioDl.url, "audio/mpeg"),
-      },
-    };
-  }
-
-  if (images.length === 1 || downloads.length === 1) {
-    const src = images[0] ?? downloads[0]!;
+  if (imgs.length === 1) {
     return {
       kind: "image",
-      metadata: buildMetadata("", "unknown", result),
-      file: {
-        url: src.url,
-        mime: guessMime(src.url, "image/jpeg"),
-        width: "width" in src ? src.width : undefined,
-        height: "height" in src ? src.height : undefined,
-        sizeBytes: "size" in src ? src.size : undefined,
-      },
-    };
-  }
-
-  if (downloads.length > 0) {
-    const d = downloads[0]!;
-    const mime = guessMime(d.url, "application/octet-stream");
-    if (mime.startsWith("video/")) {
-      return {
-        kind: "video",
-        metadata: buildMetadata("", "unknown", result),
-        file: { url: d.url, mime, quality: d.quality, sizeBytes: d.size },
-      };
-    }
-    if (mime.startsWith("audio/")) {
-      return {
-        kind: "audio",
-        metadata: buildMetadata("", "unknown", result),
-        file: { url: d.url, mime },
-      };
-    }
-    return {
-      kind: "image",
-      metadata: buildMetadata("", "unknown", result),
-      file: { url: d.url, mime, sizeBytes: d.size },
+      metadata: meta,
+      file: { url: imgs[0]!, mime: guessMime(imgs[0]!, "image/jpeg") },
     };
   }
 
   return null;
 }
 
-async function callScrapr(
-  platform: Platform,
+async function tryFns(
+  fns: Array<{ name: string; fn: ScraprFn | undefined }>,
   url: string
-): Promise<ScraprResponse> {
+): Promise<unknown> {
+  const errors: string[] = [];
+  for (const { name, fn } of fns) {
+    if (!fn) continue;
+    try {
+      const res = await fn(url);
+      const normalized = res as LooseResult;
+      const ok =
+        normalized?.status === true ||
+        normalized?.success === true ||
+        !!(normalized?.result || normalized?.data || normalized?.downloads || normalized?.media);
+      if (ok) return res;
+      errors.push(`${name}: ${asString(normalized?.message) ?? "empty"}`);
+    } catch (e) {
+      errors.push(`${name}: ${e instanceof Error ? e.message : String(e)}`);
+    }
+  }
+  throw new Error(errors.join(" | ") || "All scrapers failed");
+}
+
+async function callScrapr(platform: Platform, url: string): Promise<unknown> {
   const scrapr = await import("@coflyn/scrapr");
 
-  try {
-    let res: ScraprResponse;
-
-    switch (platform) {
-      case "tiktok": {
-        const fn =
-          scrapr.tiktok?.snaptik ??
-          scrapr.tiktok?.tiktokio ??
-          scrapr.tiktok?.ssstik;
-        if (!fn) throw new ScraperError("TikTok scraper unavailable", "UPSTREAM_ERROR");
-        res = (await fn(url)) as ScraprResponse;
-        break;
-      }
-      case "instagram": {
-        const fn = scrapr.instagram?.snapsave ?? scrapr.instagram?.direct;
-        if (!fn) throw new ScraperError("Instagram scraper unavailable", "UPSTREAM_ERROR");
-        res = (await fn(url)) as ScraprResponse;
-        break;
-      }
-      case "x": {
-        const fn = scrapr.twitter?.direct ?? scrapr.twitter?.fx;
-        if (!fn) throw new ScraperError("X/Twitter scraper unavailable", "UPSTREAM_ERROR");
-        res = (await fn(url)) as ScraprResponse;
-        break;
-      }
-      case "douyin": {
-        const fn = scrapr.douyin?.direct;
-        if (!fn) throw new ScraperError("Douyin scraper unavailable", "UPSTREAM_ERROR");
-        res = (await fn(url)) as ScraprResponse;
-        break;
-      }
-      case "xiaohongshu": {
-        const fn = scrapr.rednote?.direct ?? scrapr.rednote?.snapsave;
-        if (!fn) throw new ScraperError("Xiaohongshu scraper unavailable", "UPSTREAM_ERROR");
-        res = (await fn(url)) as ScraprResponse;
-        break;
-      }
-      case "youtube": {
-        const fn = scrapr.youtube?.direct ?? scrapr.youtube?.y2mate;
-        if (!fn) throw new ScraperError("YouTube scraper unavailable", "UPSTREAM_ERROR");
-        res = (await fn(url)) as ScraprResponse;
-        break;
-      }
-      case "facebook": {
-        const fn = scrapr.facebook?.snapsave ?? scrapr.facebook?.fdown;
-        if (!fn) throw new ScraperError("Facebook scraper unavailable", "UPSTREAM_ERROR");
-        res = (await fn(url)) as ScraprResponse;
-        break;
-      }
-      case "pinterest": {
-        const fn = scrapr.pinterest?.direct;
-        if (!fn) throw new ScraperError("Pinterest scraper unavailable", "UPSTREAM_ERROR");
-        res = (await fn(url)) as ScraprResponse;
-        break;
-      }
-      default:
-        throw new ScraperError("Unsupported platform", "UNSUPPORTED_PLATFORM");
-    }
-
-    return res;
-  } catch (err) {
-    if (err instanceof ScraperError) throw err;
-    const msg = err instanceof Error ? err.message : String(err);
-    if (/rate.?limit|too many|429/i.test(msg)) {
-      throw new ScraperError(msg, "RATE_LIMITED_BY_SOURCE");
-    }
-    if (/private|login|auth/i.test(msg)) {
-      throw new ScraperError(msg, "PRIVATE_CONTENT");
-    }
-    if (/not found|404|deleted/i.test(msg)) {
-      throw new ScraperError(msg, "NOT_FOUND");
-    }
-    throw new ScraperError(msg || "Upstream scraper failed", "UPSTREAM_ERROR");
+  switch (platform) {
+    case "instagram":
+      return tryFns(
+        [
+          { name: "instagram.direct", fn: scrapr.instagram?.direct },
+          { name: "instagram.indown", fn: scrapr.instagram?.indown },
+          { name: "instagram.snapsave", fn: scrapr.instagram?.snapsave },
+          { name: "instagram.snapinsta", fn: scrapr.instagram?.snapinsta },
+        ],
+        url
+      );
+    case "tiktok":
+      return tryFns(
+        [
+          { name: "tiktok.tiktokio", fn: scrapr.tiktok?.tiktokio },
+          { name: "tiktok.snaptik", fn: scrapr.tiktok?.snaptik },
+          { name: "tiktok.ssstik", fn: scrapr.tiktok?.ssstik },
+          { name: "tiktok.savetik", fn: scrapr.tiktok?.savetik },
+          { name: "tiktok.tikdownloader", fn: scrapr.tiktok?.tikdownloader },
+        ],
+        url
+      );
+    case "x":
+      return tryFns(
+        [
+          { name: "twitter.direct", fn: scrapr.twitter?.direct },
+          { name: "twitter.fx", fn: scrapr.twitter?.fx },
+        ],
+        url
+      );
+    case "douyin":
+      return tryFns([{ name: "douyin.direct", fn: scrapr.douyin?.direct }], url);
+    case "xiaohongshu":
+      return tryFns(
+        [
+          { name: "rednote.direct", fn: scrapr.rednote?.direct },
+          { name: "rednote.snapsave", fn: scrapr.rednote?.snapsave },
+        ],
+        url
+      );
+    case "youtube":
+      return tryFns(
+        [
+          { name: "youtube.direct", fn: scrapr.youtube?.direct },
+          { name: "youtube.y2mate", fn: scrapr.youtube?.y2mate },
+          { name: "youtube.ytmp3", fn: scrapr.youtube?.ytmp3 },
+        ],
+        url
+      );
+    case "facebook":
+      return tryFns(
+        [
+          { name: "facebook.snapsave", fn: scrapr.facebook?.snapsave },
+          { name: "facebook.fdown", fn: scrapr.facebook?.fdown },
+        ],
+        url
+      );
+    case "pinterest":
+      return tryFns(
+        [
+          { name: "pinterest.direct", fn: scrapr.pinterest?.direct },
+          { name: "pinterest.pindown", fn: scrapr.pinterest?.pindown },
+        ],
+        url
+      );
+    default:
+      throw new ScraperError("Unsupported platform", "UNSUPPORTED_PLATFORM");
   }
 }
 
 export async function extractMedia(url: string): Promise<MediaResult> {
   const platform = detectPlatform(url);
   if (platform === "unknown") {
+    throw new ScraperError("URL does not match a supported platform", "UNSUPPORTED_PLATFORM");
+  }
+
+  let raw: unknown;
+  try {
+    raw = await callScrapr(platform, url);
+  } catch (err) {
+    const msg = err instanceof Error ? err.message : String(err);
+    if (/rate.?limit|too many|429/i.test(msg)) {
+      throw new ScraperError(
+        "Gagal mengekstrak. Pastikan link publik, atau coba lagi 1-2 menit kemudian.",
+        "RATE_LIMITED_BY_SOURCE"
+      );
+    }
+    if (/timeout|ETIMEDOUT|ESOCKETTIMEDOUT|5000ms/i.test(msg)) {
+      throw new ScraperError(
+        "Scraper timeout. Platform terlalu lambat merespons atau memblokir request.",
+        "UPSTREAM_ERROR"
+      );
+    }
+    if (/private|login|auth/i.test(msg)) throw new ScraperError(msg, "PRIVATE_CONTENT");
+    if (/not found|404|deleted/i.test(msg)) throw new ScraperError(msg, "NOT_FOUND");
     throw new ScraperError(
-      "URL does not match a supported platform",
-      "UNSUPPORTED_PLATFORM"
+      "Gagal mengekstrak. Pastikan link publik, atau coba lagi 1-2 menit kemudian.",
+      "UPSTREAM_ERROR"
     );
   }
 
-  const raw = await callScrapr(platform, url);
-
-  if (!raw.status || !raw.result) {
-    const msg = raw.message ?? "No media found";
-    if (/rate.?limit|429/i.test(msg)) {
-      throw new ScraperError(msg, "RATE_LIMITED_BY_SOURCE");
-    }
-    if (/private|login/i.test(msg)) {
-      throw new ScraperError(msg, "PRIVATE_CONTENT");
-    }
-    if (/not found|404/i.test(msg)) {
-      throw new ScraperError(msg, "NOT_FOUND");
-    }
-    throw new ScraperError(msg, "PARSE_ERROR");
-  }
-
-  const normalized = normalizeDownloads(raw.result);
+  const normalized = normalizeLoose(raw, platform, url);
   if (!normalized) {
     throw new ScraperError(
-      "Could not parse media payload from upstream",
+      "Gagal mengekstrak. Pastikan link publik, atau coba lagi 1-2 menit kemudian.",
       "PARSE_ERROR"
     );
   }
@@ -319,13 +356,8 @@ export async function extractMedia(url: string): Promise<MediaResult> {
     ...normalized.metadata,
     platform,
     sourceUrl: url,
-    title: normalized.metadata.title ?? raw.result.title,
-    author: normalized.metadata.author ?? raw.result.author,
-    thumbnailUrl: normalized.metadata.thumbnailUrl ?? raw.result.thumbnail,
-    durationSec: normalized.metadata.durationSec ?? raw.result.duration,
     extractedAt: new Date().toISOString(),
   };
-
   return normalized;
 }
 

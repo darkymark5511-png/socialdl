@@ -1,9 +1,6 @@
 import type { NextAuthConfig } from "next-auth";
 
-/**
- * Edge-safe auth config (no bcrypt / Node-only APIs).
- * Used by middleware. Full providers live in lib/auth.ts.
- */
+/** Edge-safe config only. No bcrypt. Used by middleware. */
 export const authConfig = {
   pages: {
     signIn: "/admin/login",

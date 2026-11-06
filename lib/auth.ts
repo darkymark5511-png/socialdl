@@ -3,6 +3,7 @@ import Credentials from "next-auth/providers/credentials";
 import bcrypt from "bcryptjs";
 import { z } from "zod";
 import { authConfig } from "./auth.config";
+import { verifyVip } from "./vip-store";
 
 const credentialsSchema = z.object({
   username: z.string().min(1).max(64),
@@ -24,17 +25,37 @@ export const { handlers, auth, signIn, signOut } = NextAuth({
 
         const expectedUser = process.env.ADMIN_USERNAME;
         const hash = process.env.ADMIN_PASSWORD_HASH;
-        if (!expectedUser || !hash) return null;
-        if (parsed.data.username !== expectedUser) return null;
 
-        const ok = await bcrypt.compare(parsed.data.password, hash);
-        if (!ok) return null;
+        if (expectedUser && hash && parsed.data.username === expectedUser) {
+          const ok = await bcrypt.compare(parsed.data.password, hash);
+          if (ok) {
+            return {
+              id: "admin",
+              name: expectedUser,
+              email: `${expectedUser}@socialdl.local`,
+              role: "admin",
+            };
+          }
+        }
 
-        return {
-          id: "admin",
-          name: expectedUser,
-          email: `${expectedUser}@socialdl.local`,
-        };
+        try {
+          const vip = await verifyVip(
+            parsed.data.username,
+            parsed.data.password
+          );
+          if (vip) {
+            return {
+              id: vip.id,
+              name: vip.username,
+              email: `${vip.username}@vip.socialdl.local`,
+              role: "vip",
+            };
+          }
+        } catch {
+          // blob unavailable
+        }
+
+        return null;
       },
     }),
   ],
@@ -44,12 +65,16 @@ export const { handlers, auth, signIn, signOut } = NextAuth({
       if (user) {
         token.sub = user.id;
         token.name = user.name;
+        token.role = (user as { role?: string }).role ?? "user";
       }
       return token;
     },
     async session({ session, token }) {
       if (session.user) {
         session.user.name = token.name as string;
+        (session.user as { role?: string }).role =
+          (token.role as string) ?? "user";
+        (session.user as { id?: string }).id = token.sub as string;
       }
       return session;
     },

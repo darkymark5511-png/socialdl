@@ -3,8 +3,30 @@ import { assertSafeUrl } from "@/lib/ssrf-guard";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
+export const maxDuration = 60;
 
 const MAX_BYTES = 200 * 1024 * 1024;
+
+const CHROME_UA =
+  "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36";
+
+function refererFor(target: string): string {
+  try {
+    const u = new URL(target);
+    const h = u.hostname.toLowerCase();
+    if (h.includes("instagram") || h.includes("cdninstagram") || h.includes("fbcdn"))
+      return "https://www.instagram.com/";
+    if (h.includes("tiktok") || h.includes("tiktokcdn"))
+      return "https://www.tiktok.com/";
+    if (h.includes("pinimg") || h.includes("pinterest"))
+      return "https://www.pinterest.com/";
+    if (h.includes("twimg") || h.includes("twitter") || h.includes("x.com"))
+      return "https://x.com/";
+    return `${u.protocol}//${u.host}/`;
+  } catch {
+    return "https://www.google.com/";
+  }
+}
 
 export async function GET(req: NextRequest) {
   const urlParam = req.nextUrl.searchParams.get("url");
@@ -36,9 +58,11 @@ export async function GET(req: NextRequest) {
     upstream = await fetch(target, {
       redirect: "follow",
       headers: {
-        "User-Agent":
-          "Mozilla/5.0 (compatible; SocialDL/1.0; +https://socialdl.vercel.app)",
+        "User-Agent": CHROME_UA,
         Accept: "*/*",
+        "Accept-Language": "en-US,en;q=0.9",
+        Referer: refererFor(target),
+        Origin: refererFor(target).replace(/\/$/, ""),
       },
       signal: AbortSignal.timeout(60_000),
     });
@@ -47,10 +71,43 @@ export async function GET(req: NextRequest) {
   }
 
   if (!upstream.ok || !upstream.body) {
-    return NextResponse.json(
-      { error: `Upstream status ${upstream.status}` },
-      { status: 502 }
-    );
+    if (upstream.status === 403 || upstream.status === 401) {
+      try {
+        const retry = await fetch(target, {
+          redirect: "follow",
+          headers: {
+            "User-Agent": CHROME_UA,
+            Accept: "*/*",
+            Referer: refererFor(target),
+          },
+          signal: AbortSignal.timeout(45_000),
+        });
+        if (retry.ok && retry.body) {
+          upstream = retry;
+        } else {
+          return NextResponse.json(
+            {
+              error: `Upstream blocked (${upstream.status}). Media host denied the download proxy — try opening the direct link.`,
+              code: "UPSTREAM_FORBIDDEN",
+            },
+            { status: 403 }
+          );
+        }
+      } catch {
+        return NextResponse.json(
+          {
+            error: `Upstream blocked (${upstream.status}). Media host denied the download proxy.`,
+            code: "UPSTREAM_FORBIDDEN",
+          },
+          { status: 403 }
+        );
+      }
+    } else {
+      return NextResponse.json(
+        { error: `Upstream status ${upstream.status}` },
+        { status: 502 }
+      );
+    }
   }
 
   const contentLength = upstream.headers.get("content-length");

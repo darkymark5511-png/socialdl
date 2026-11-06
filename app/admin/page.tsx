@@ -1,15 +1,7 @@
 import { auth, signOut } from "@/lib/auth";
 import { redirect } from "next/navigation";
 import { getLogs, getStats, clearLogs } from "@/lib/logger";
-import { Button } from "@/components/ui/button";
-import {
-  Card,
-  CardContent,
-  CardDescription,
-  CardHeader,
-  CardTitle,
-} from "@/components/ui/card";
-import { Badge } from "@/components/ui/badge";
+import { VipManager } from "@/components/VipManager";
 
 async function clearAction() {
   "use server";
@@ -25,81 +17,78 @@ export default async function AdminPage() {
   const session = await auth();
   if (!session) redirect("/admin/login");
 
+  const role = (session.user as { role?: string }).role;
+  if (role !== "admin") {
+    redirect("/");
+  }
+
   const logs = getLogs();
   const stats = getStats();
 
   return (
-    <div className="mx-auto max-w-5xl space-y-6 px-4 py-10">
-      <div className="flex items-center justify-between">
-        <div>
-          <h1 className="text-2xl font-bold">Admin dashboard</h1>
-          <p className="text-sm text-zinc-500">
-            Signed in as {session.user?.name}
-          </p>
+    <div className="min-h-screen bg-[#0a0a0a] text-white">
+      <div className="mx-auto max-w-5xl space-y-6 px-4 py-10">
+        <div className="flex flex-wrap items-center justify-between gap-3">
+          <div>
+            <p className="text-xs uppercase tracking-[0.18em] text-white/40">
+              owner
+            </p>
+            <h1 className="text-2xl font-semibold">Admin dashboard</h1>
+            <p className="text-sm text-white/50">
+              Signed in as {session.user?.name}
+            </p>
+          </div>
+          <div className="flex gap-2">
+            <form action={clearAction}>
+              <button
+                type="submit"
+                className="h-9 rounded-xl border border-white/10 px-3 text-sm text-white/80 hover:bg-white/5"
+              >
+                Clear logs
+              </button>
+            </form>
+            <form action={signOutAction}>
+              <button
+                type="submit"
+                className="h-9 rounded-xl bg-white px-3 text-sm font-semibold text-black"
+              >
+                Sign out
+              </button>
+            </form>
+          </div>
         </div>
-        <div className="flex gap-2">
-          <form action={clearAction}>
-            <Button type="submit" variant="outline" size="sm">
-              Clear logs
-            </Button>
-          </form>
-          <form action={signOutAction}>
-            <Button type="submit" variant="secondary" size="sm">
-              Sign out
-            </Button>
-          </form>
+
+        <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
+          {[
+            { label: "Total requests", value: String(stats.total) },
+            { label: "Success rate", value: `${stats.successRate}%` },
+            { label: "Top platform", value: stats.topPlatform },
+            {
+              label: "Error codes",
+              value:
+                Object.keys(stats.errorBreakdown).length === 0
+                  ? "None"
+                  : Object.entries(stats.errorBreakdown)
+                      .map(([k, v]) => `${k}:${v}`)
+                      .join(" "),
+            },
+          ].map((c) => (
+            <div
+              key={c.label}
+              className="rounded-2xl border border-white/10 bg-white/5 p-4 backdrop-blur-xl"
+            >
+              <p className="text-xs text-white/40">{c.label}</p>
+              <p className="mt-1 text-xl font-semibold capitalize">{c.value}</p>
+            </div>
+          ))}
         </div>
-      </div>
 
-      <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
-        <Card>
-          <CardHeader className="pb-2">
-            <CardDescription>Total requests</CardDescription>
-            <CardTitle className="text-3xl">{stats.total}</CardTitle>
-          </CardHeader>
-        </Card>
-        <Card>
-          <CardHeader className="pb-2">
-            <CardDescription>Success rate</CardDescription>
-            <CardTitle className="text-3xl">{stats.successRate}%</CardTitle>
-          </CardHeader>
-        </Card>
-        <Card>
-          <CardHeader className="pb-2">
-            <CardDescription>Top platform</CardDescription>
-            <CardTitle className="text-3xl capitalize">
-              {stats.topPlatform}
-            </CardTitle>
-          </CardHeader>
-        </Card>
-        <Card>
-          <CardHeader className="pb-2">
-            <CardDescription>Error codes</CardDescription>
-            <CardContent className="flex flex-wrap gap-1 p-0 pt-2">
-              {Object.keys(stats.errorBreakdown).length === 0 ? (
-                <span className="text-sm text-zinc-500">None</span>
-              ) : (
-                Object.entries(stats.errorBreakdown).map(([code, n]) => (
-                  <Badge key={code} variant="destructive">
-                    {code}: {n}
-                  </Badge>
-                ))
-              )}
-            </CardContent>
-          </CardHeader>
-        </Card>
-      </div>
+        <VipManager />
 
-      <Card>
-        <CardHeader>
-          <CardTitle>Request log</CardTitle>
-          <CardDescription>
-            In-memory ring buffer (max 500). Hashed IP only.
-          </CardDescription>
-        </CardHeader>
-        <CardContent className="overflow-x-auto">
+        <div className="overflow-x-auto rounded-2xl border border-white/10 bg-white/5 p-4 backdrop-blur-xl">
+          <h2 className="mb-3 text-sm font-medium text-white/70">Request log</h2>
           <table className="w-full text-left text-sm">
-            <thead className="border-b border-zinc-200 text-xs uppercase text-zinc-500 dark:border-zinc-800">
+            <thead className="text-xs uppercase text-white/40">
               <tr>
                 <th className="py-2 pr-3">Time</th>
                 <th className="py-2 pr-3">IP hash</th>
@@ -112,40 +101,35 @@ export default async function AdminPage() {
             <tbody>
               {logs.length === 0 && (
                 <tr>
-                  <td colSpan={6} className="py-6 text-center text-zinc-500">
+                  <td colSpan={6} className="py-6 text-center text-white/30">
                     No requests yet
                   </td>
                 </tr>
               )}
               {logs.map((row) => (
-                <tr
-                  key={row.id}
-                  className="border-b border-zinc-100 dark:border-zinc-900"
-                >
-                  <td className="py-2 pr-3 font-mono text-xs">
+                <tr key={row.id} className="border-t border-white/10">
+                  <td className="py-2 pr-3 font-mono text-xs text-white/50">
                     {new Date(row.ts).toLocaleString()}
                   </td>
-                  <td className="py-2 pr-3 font-mono text-xs">
-                    {row.hashedIp}
-                  </td>
+                  <td className="py-2 pr-3 font-mono text-xs">{row.hashedIp}</td>
                   <td className="py-2 pr-3 capitalize">{row.platform}</td>
                   <td className="py-2 pr-3">{row.kind}</td>
                   <td className="py-2 pr-3">{row.durationMs}</td>
                   <td className="py-2">
-                    <Badge
-                      variant={
-                        row.status >= 400 ? "destructive" : "secondary"
+                    <span
+                      className={
+                        row.status >= 400 ? "text-red-300" : "text-emerald-300"
                       }
                     >
                       {row.status}
-                    </Badge>
+                    </span>
                   </td>
                 </tr>
               ))}
             </tbody>
           </table>
-        </CardContent>
-      </Card>
+        </div>
+      </div>
     </div>
   );
 }

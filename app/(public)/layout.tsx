@@ -19,13 +19,18 @@ export default function PublicLayout({
             <span className="inline-block h-2.5 w-2.5 rounded-full bg-white" />
             <span className="text-lg font-semibold tracking-tight">SocialDL</span>
           </div>
-          <a href="/admin" className="text-xs text-white/40 hover:text-white/70">
-            admin
-          </a>
+          <div className="flex items-center gap-4 text-xs">
+            <a href="/vip" className="text-white/40 hover:text-white/70">
+              VIP
+            </a>
+            <a href="/admin" className="text-white/40 hover:text-white/70">
+              owner
+            </a>
+          </div>
         </header>
         <main className="flex-1">{children}</main>
         <footer className="mt-16 border-t border-white/10 pt-6 text-xs text-white/40">
-          Public links only. No accounts stored. Rate limited.
+          Public links only. No accounts stored on free tier. Rate limited.
         </footer>
       </div>
     </div>

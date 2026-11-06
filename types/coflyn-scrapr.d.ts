@@ -1,21 +1,10 @@
 declare module "@coflyn/scrapr" {
   type ScraprResult = {
-    status: boolean;
+    status?: boolean;
+    success?: boolean;
     message?: string;
-    result?: {
-      title?: string;
-      author?: string;
-      thumbnail?: string;
-      duration?: number;
-      downloads?: Array<{
-        url: string;
-        quality?: string;
-        type?: string;
-        size?: number;
-      }>;
-      images?: Array<{ url: string; width?: number; height?: number }>;
-      videos?: Array<{ url: string; quality?: string; duration?: number }>;
-    };
+    result?: Record<string, unknown>;
+    data?: Record<string, unknown>;
   };
 
   type ScraprFn = (url: string) => Promise<ScraprResult>;
@@ -30,6 +19,8 @@ declare module "@coflyn/scrapr" {
   export const instagram: {
     snapsave?: ScraprFn;
     direct?: ScraprFn;
+    indown?: ScraprFn;
+    snapinsta?: ScraprFn;
   };
   export const twitter: {
     direct?: ScraprFn;
@@ -45,6 +36,7 @@ declare module "@coflyn/scrapr" {
   export const youtube: {
     direct?: ScraprFn;
     y2mate?: ScraprFn;
+    ytmp3?: ScraprFn;
   };
   export const facebook: {
     snapsave?: ScraprFn;
@@ -52,5 +44,6 @@ declare module "@coflyn/scrapr" {
   };
   export const pinterest: {
     direct?: ScraprFn;
+    pindown?: ScraprFn;
   };
 }
